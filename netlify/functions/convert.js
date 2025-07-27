@@ -1,4 +1,4 @@
-import { HfInference } from '@huggingface/inference';
+const { HfInference } = require('@huggingface/inference');
 
 /**
  * AI-Powered SQL to Snowflake Converter
@@ -7,8 +7,8 @@ import { HfInference } from '@huggingface/inference';
 
 class AIConverter {
   constructor() {
-    // Initialize Hugging Face client (no API key needed for free tier)
-    this.hf = new HfInference();
+    // Initialize Hugging Face client
+    this.hf = new HfInference(process.env.HUGGINGFACE_API_KEY || '');
     
     // Fallback conversion rules for when AI is unavailable
     this.fallbackRules = {
@@ -65,59 +65,79 @@ class AIConverter {
 
   async convertWithAI(sql, sourceDialect) {
     try {
-      const prompt = this.buildConversionPrompt(sql, sourceDialect);
+      console.log(`Starting AI conversion for ${sourceDialect} SQL:`, sql.substring(0, 100) + '...');
       
-      // Use Hugging Face's free text generation model
+      const prompt = this.buildConversionPrompt(sql, sourceDialect);
+      console.log('Generated prompt:', prompt.substring(0, 200) + '...');
+      
+      // Use a more suitable model for code generation
       const response = await this.hf.textGeneration({
-        model: 'microsoft/DialoGPT-medium',
+        model: 'bigcode/starcoder',
         inputs: prompt,
         parameters: {
-          max_new_tokens: 2000,
-          temperature: 0.1,
-          do_sample: false,
+          max_new_tokens: 1000,
+          temperature: 0.2,
+          do_sample: true,
           return_full_text: false
         }
       });
 
+      console.log('AI response received:', response);
+
       let convertedSql = response.generated_text?.trim();
       
       if (!convertedSql || convertedSql.length < 10) {
+        console.log('AI response too short, using fallback');
         throw new Error('AI response too short or empty');
       }
 
+      console.log('Raw AI response:', convertedSql);
+
       // Clean up the AI response
       convertedSql = this.cleanAIResponse(convertedSql);
+      console.log('Cleaned AI response:', convertedSql);
       
       // Format the SQL
       convertedSql = this.formatSQL(convertedSql);
+      console.log('Formatted SQL:', convertedSql);
       
       return convertedSql;
     } catch (error) {
-      console.log('AI conversion failed, using fallback:', error.message);
+      console.error('AI conversion failed, using fallback:', error.message);
       return this.fallbackConversion(sql, sourceDialect);
     }
   }
 
   buildConversionPrompt(sql, sourceDialect) {
-    return `Convert the following ${sourceDialect.toUpperCase()} SQL to Snowflake SQL syntax. 
-Follow these rules:
+    return `You are an expert SQL developer. Convert this ${sourceDialect.toUpperCase()} SQL to Snowflake SQL.
+
+Key conversion rules:
 1. Convert data types to Snowflake equivalents
-2. Update function names to Snowflake syntax
-3. Fix any dialect-specific syntax
-4. Maintain proper SQL formatting
-5. Only return the converted SQL, no explanations
+2. Replace functions with Snowflake equivalents
+3. Fix dialect-specific syntax differences
+4. Use proper Snowflake identifiers (double quotes if needed)
+5. Return ONLY the converted SQL code, no explanations
+
+Examples:
+- MySQL TINYINT → NUMBER(3,0)
+- SQL Server GETDATE() → CURRENT_TIMESTAMP()
+- PostgreSQL SERIAL → NUMBER AUTOINCREMENT
+- Oracle VARCHAR2 → VARCHAR
 
 ${sourceDialect.toUpperCase()} SQL:
+\`\`\`sql
 ${sql}
+\`\`\`
 
-Snowflake SQL:`;
+Snowflake SQL:
+\`\`\`sql`;
   }
 
   cleanAIResponse(response) {
     // Remove common AI response artifacts
     let cleaned = response
-      .replace(/^(Snowflake SQL:|Here's the converted SQL:|```sql|```)/i, '')
-      .replace(/(```|Here's|The converted).*$/i, '')
+      .replace(/^(Snowflake SQL:|Here's the converted SQL:|```sql|```|sql)/i, '')
+      .replace(/(```|Here's|The converted|Note:|Explanation:).*$/is, '')
       .trim();
 
     // Remove any explanatory text after the SQL
@@ -133,16 +153,17 @@ Snowflake SQL:`;
       
       // Check if this looks like SQL
       if (!foundSQL && (
-        /^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH)/i.test(trimmedLine) ||
-        /^(FROM|WHERE|JOIN|GROUP BY|ORDER BY|HAVING)/i.test(trimmedLine)
+        /^(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH|MERGE)/i.test(trimmedLine) ||
+        /^(FROM|WHERE|JOIN|GROUP BY|ORDER BY|HAVING|UNION)/i.test(trimmedLine) ||
+        /^\s*(--|\/\*)/i.test(trimmedLine) // SQL comments
       )) {
         foundSQL = true;
       }
       
       // Stop if we hit explanatory text after SQL
       if (foundSQL && (
-        /^(This|The|Note:|Explanation:|Here)/i.test(trimmedLine) ||
-        /^(Key changes|Main differences)/i.test(trimmedLine)
+        /^(This|The|Note:|Explanation:|Here|Key changes|Main differences|In this)/i.test(trimmedLine) ||
+        /^(The main|I've converted|As you can see)/i.test(trimmedLine)
       )) {
         break;
       }
@@ -340,7 +361,9 @@ exports.handler = async (event, context) => {
         const originalSql = file.content.toString('utf-8');
         
         try {
+          console.log(`Processing file: ${file.filename}`);
           const convertedSql = await aiConverter.convertWithAI(originalSql, sourceDialect);
+          console.log(`Successfully converted ${file.filename}`);
           return {
             filename: file.filename,
             originalSql,
@@ -349,6 +372,7 @@ exports.handler = async (event, context) => {
             size: file.content.length
           };
         } catch (conversionError) {
+          console.error(`Failed to convert ${file.filename}:`, conversionError);
           return {
             filename: file.filename,
             originalSql,
