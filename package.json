@@ -11,6 +11,8 @@
     "server": "node server/index.js"
   },
   "dependencies": {
+    "@huggingface/inference": "^2.6.4",
+    "@huggingface/inference": "^4.5.3",
     "@monaco-editor/react": "^4.6.0",
     "jszip": "^3.10.1",
     "lambda-multipart-parser": "^1.0.1",
