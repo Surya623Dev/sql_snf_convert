@@ -70,17 +70,42 @@ class AIConverter {
       const prompt = this.buildConversionPrompt(sql, sourceDialect);
       console.log('Generated prompt:', prompt.substring(0, 200) + '...');
       
-      // Use a more suitable model for code generation
-      const response = await this.hf.textGeneration({
-        model: 'bigcode/starcoder',
-        inputs: prompt,
-        parameters: {
-          max_new_tokens: 1000,
-          temperature: 0.2,
-          do_sample: true,
-          return_full_text: false
+      // Try multiple models in order of preference
+      const models = [
+        'microsoft/DialoGPT-medium',
+        'gpt2',
+        'distilgpt2'
+      ];
+      
+      let response = null;
+      let lastError = null;
+      
+      for (const model of models) {
+        try {
+          console.log(`Trying model: ${model}`);
+          response = await this.hf.textGeneration({
+            model: model,
+            inputs: prompt,
+            parameters: {
+              max_new_tokens: 500,
+              temperature: 0.3,
+              do_sample: true,
+              return_full_text: false,
+              pad_token_id: 50256
+            }
+          });
+          console.log(`Successfully got response from ${model}`);
+          break;
+        } catch (modelError) {
+          console.log(`Model ${model} failed:`, modelError.message);
+          lastError = modelError;
+          continue;
         }
-      });
+      }
+      
+      if (!response) {
+        throw lastError || new Error('All models failed');
+      }
 
       console.log('AI response received:', response);
 
@@ -109,28 +134,20 @@ class AIConverter {
   }
 
   buildConversionPrompt(sql, sourceDialect) {
-    return `You are an expert SQL developer. Convert this ${sourceDialect.toUpperCase()} SQL to Snowflake SQL.
+    return `Convert ${sourceDialect.toUpperCase()} SQL to Snowflake SQL.
 
-Key conversion rules:
-1. Convert data types to Snowflake equivalents
-2. Replace functions with Snowflake equivalents
-3. Fix dialect-specific syntax differences
-4. Use proper Snowflake identifiers (double quotes if needed)
-5. Return ONLY the converted SQL code, no explanations
+Rules:
+- TINYINT/SMALLINT/INT/BIGINT → NUMBER
+- VARCHAR(MAX)/TEXT → VARCHAR(16777216)
+- GETDATE() → CURRENT_TIMESTAMP()
+- TOP N → LIMIT N
+- LEN() → LENGTH()
+- ISNULL() → NVL()
 
-Examples:
-- MySQL TINYINT → NUMBER(3,0)
-- SQL Server GETDATE() → CURRENT_TIMESTAMP()
-- PostgreSQL SERIAL → NUMBER AUTOINCREMENT
-- Oracle VARCHAR2 → VARCHAR
-
-${sourceDialect.toUpperCase()} SQL:
-\`\`\`sql
+Input SQL:
 ${sql}
-\`\`\`
 
-Snowflake SQL:
-\`\`\`sql`;
+Snowflake SQL:`;
   }
 
   cleanAIResponse(response) {
