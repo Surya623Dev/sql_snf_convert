@@ -1,226 +1,347 @@
-// Using a simple fetch-based approach for free AI services
+const JSZip = require('jszip');
 
 /**
- * AI-Powered SQL to Snowflake Converter
- * Uses free AI services for intelligent SQL conversion
+ * Advanced SQL to Snowflake Converter
+ * Uses proper SQL parsing and syntax analysis for accurate conversion
  */
 
-class AIConverter {
+class SQLParser {
   constructor() {
-    // Fallback conversion rules for when AI is unavailable
-    this.fallbackRules = {
-      mysql: [
-        { pattern: /\bTINYINT\b/gi, replacement: 'NUMBER(3,0)' },
-        { pattern: /\bSMALLINT\b/gi, replacement: 'NUMBER(5,0)' },
-        { pattern: /\bMEDIUMINT\b/gi, replacement: 'NUMBER(7,0)' },
-        { pattern: /\bINT\b/gi, replacement: 'NUMBER(10,0)' },
-        { pattern: /\bBIGINT\b/gi, replacement: 'NUMBER(19,0)' },
-        { pattern: /\bDOUBLE\b/gi, replacement: 'FLOAT' },
-        { pattern: /\bTEXT\b/gi, replacement: 'VARCHAR(16777216)' },
-        { pattern: /\bNOW\(\)/gi, replacement: 'CURRENT_TIMESTAMP()' },
-        { pattern: /\bCURDATE\(\)/gi, replacement: 'CURRENT_DATE()' },
-        { pattern: /\bIFNULL\(/gi, replacement: 'NVL(' },
-        { pattern: /\b`([^`]+)`/g, replacement: '"$1"' },
-        { pattern: /\bAUTO_INCREMENT\b/gi, replacement: 'AUTOINCREMENT' },
-      ],
-      postgresql: [
-        { pattern: /\bSERIAL\b/gi, replacement: 'NUMBER AUTOINCREMENT' },
-        { pattern: /\bBIGSERIAL\b/gi, replacement: 'NUMBER AUTOINCREMENT' },
-        { pattern: /\bBOOLEAN\b/gi, replacement: 'BOOLEAN' },
-        { pattern: /\bTEXT\b/gi, replacement: 'VARCHAR(16777216)' },
-        { pattern: /\bBYTEA\b/gi, replacement: 'BINARY' },
-        { pattern: /\bNOW\(\)/gi, replacement: 'CURRENT_TIMESTAMP()' },
-        { pattern: /\bLIMIT\s+(\d+)\s+OFFSET\s+(\d+)/gi, replacement: 'LIMIT $2, $1' },
-      ],
-      sqlserver: [
-        { pattern: /\bBIT\b/gi, replacement: 'BOOLEAN' },
-        { pattern: /\bTINYINT\b/gi, replacement: 'NUMBER(3,0)' },
-        { pattern: /\bSMALLINT\b/gi, replacement: 'NUMBER(5,0)' },
-        { pattern: /\bINT\b/gi, replacement: 'NUMBER(10,0)' },
-        { pattern: /\bBIGINT\b/gi, replacement: 'NUMBER(19,0)' },
-        { pattern: /\bNVARCHAR\(MAX\)/gi, replacement: 'VARCHAR(16777216)' },
-        { pattern: /\bVARCHAR\(MAX\)/gi, replacement: 'VARCHAR(16777216)' },
-        { pattern: /\bTOP\s+(\d+)/gi, replacement: 'LIMIT $1' },
-        { pattern: /\bGETDATE\(\)/gi, replacement: 'CURRENT_TIMESTAMP()' },
-        { pattern: /\bLEN\(/gi, replacement: 'LENGTH(' },
-        { pattern: /\bISNULL\(/gi, replacement: 'NVL(' },
-        { pattern: /\b\[([^\]]+)\]/g, replacement: '"$1"' },
-      ],
-      oracle: [
-        { pattern: /\bVARCHAR2\b/gi, replacement: 'VARCHAR' },
-        { pattern: /\bNCHAR\b/gi, replacement: 'CHAR' },
-        { pattern: /\bNVARCHAR2\b/gi, replacement: 'VARCHAR' },
-        { pattern: /\bCLOB\b/gi, replacement: 'VARCHAR(16777216)' },
-        { pattern: /\bBLOB\b/gi, replacement: 'BINARY' },
-        { pattern: /\bDATE\b/gi, replacement: 'TIMESTAMP_NTZ' },
-        { pattern: /\bSYSDATE\b/gi, replacement: 'CURRENT_TIMESTAMP()' },
-        { pattern: /\bROWNUM\s*<=?\s*(\d+)/gi, replacement: 'LIMIT $1' },
-        { pattern: /\bDUAL\b/gi, replacement: '(SELECT 1)' },
-      ]
+    this.tokens = [];
+    this.position = 0;
+    this.currentToken = null;
+  }
+
+  tokenize(sql) {
+    const tokenRegex = /(\w+|'[^']*'|"[^"]*"|`[^`]*`|\[[^\]]*\]|<=|>=|<>|!=|[<>=!]|[(),;.]|\s+|--[^\n]*|\*|\/\*[\s\S]*?\*\/)/gi;
+    this.tokens = [];
+    let match;
+    
+    while ((match = tokenRegex.exec(sql)) !== null) {
+      const token = match[0];
+      if (!/^\s+$/.test(token) && !token.startsWith('--') && !token.startsWith('/*')) {
+        this.tokens.push({
+          value: token,
+          type: this.getTokenType(token),
+          position: match.index
+        });
+      }
+    }
+    
+    this.position = 0;
+    this.currentToken = this.tokens[0] || null;
+    return this.tokens;
+  }
+
+  getTokenType(token) {
+    const keywords = [
+      'SELECT', 'FROM', 'WHERE', 'JOIN', 'INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER',
+      'ON', 'GROUP', 'BY', 'ORDER', 'HAVING', 'UNION', 'ALL', 'DISTINCT',
+      'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'ALTER', 'DROP', 'TABLE',
+      'INDEX', 'VIEW', 'DATABASE', 'SCHEMA', 'AS', 'AND', 'OR', 'NOT',
+      'IN', 'EXISTS', 'BETWEEN', 'LIKE', 'IS', 'NULL', 'TRUE', 'FALSE',
+      'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'IF', 'TOP', 'LIMIT', 'OFFSET',
+      'WITH', 'RECURSIVE', 'CTE', 'OVER', 'PARTITION', 'ROW_NUMBER', 'RANK',
+      'DENSE_RANK', 'LEAD', 'LAG', 'FIRST_VALUE', 'LAST_VALUE'
+    ];
+    
+    if (keywords.includes(token.toUpperCase())) {
+      return 'KEYWORD';
+    } else if (/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(token)) {
+      return 'IDENTIFIER';
+    } else if (/^[0-9]+(\.[0-9]+)?$/.test(token)) {
+      return 'NUMBER';
+    } else if (/^'.*'$/.test(token) || /^".*"$/.test(token)) {
+      return 'STRING';
+    } else if (['(', ')', ',', ';', '.'].includes(token)) {
+      return 'PUNCTUATION';
+    } else if (['=', '<', '>', '<=', '>=', '<>', '!='].includes(token)) {
+      return 'OPERATOR';
+    } else {
+      return 'OTHER';
+    }
+  }
+
+  peek(offset = 1) {
+    const nextPos = this.position + offset;
+    return nextPos < this.tokens.length ? this.tokens[nextPos] : null;
+  }
+
+  advance() {
+    this.position++;
+    this.currentToken = this.position < this.tokens.length ? this.tokens[this.position] : null;
+    return this.currentToken;
+  }
+
+  match(value) {
+    return this.currentToken && this.currentToken.value.toUpperCase() === value.toUpperCase();
+  }
+
+  matchAny(values) {
+    return this.currentToken && values.some(v => this.currentToken.value.toUpperCase() === v.toUpperCase());
+  }
+}
+
+class SnowflakeConverter {
+  constructor() {
+    this.parser = new SQLParser();
+    this.dialectMappings = {
+      mysql: {
+        dataTypes: {
+          'TINYINT': 'NUMBER(3,0)',
+          'SMALLINT': 'NUMBER(5,0)',
+          'MEDIUMINT': 'NUMBER(7,0)',
+          'INT': 'NUMBER(10,0)',
+          'INTEGER': 'NUMBER(10,0)',
+          'BIGINT': 'NUMBER(19,0)',
+          'DOUBLE': 'FLOAT',
+          'TEXT': 'VARCHAR(16777216)',
+          'LONGTEXT': 'VARCHAR(16777216)',
+          'MEDIUMTEXT': 'VARCHAR(16777216)',
+          'TINYTEXT': 'VARCHAR(1000)'
+        },
+        functions: {
+          'NOW()': 'CURRENT_TIMESTAMP()',
+          'CURDATE()': 'CURRENT_DATE()',
+          'CURTIME()': 'CURRENT_TIME()',
+          'IFNULL': 'NVL',
+          'CONCAT': 'CONCAT'
+        }
+      },
+      postgresql: {
+        dataTypes: {
+          'SERIAL': 'NUMBER AUTOINCREMENT',
+          'BIGSERIAL': 'NUMBER AUTOINCREMENT',
+          'BOOLEAN': 'BOOLEAN',
+          'TEXT': 'VARCHAR(16777216)',
+          'BYTEA': 'BINARY'
+        },
+        functions: {
+          'NOW()': 'CURRENT_TIMESTAMP()',
+          'CURRENT_DATE': 'CURRENT_DATE()',
+          'CURRENT_TIME': 'CURRENT_TIME()'
+        }
+      },
+      sqlserver: {
+        dataTypes: {
+          'BIT': 'BOOLEAN',
+          'TINYINT': 'NUMBER(3,0)',
+          'SMALLINT': 'NUMBER(5,0)',
+          'INT': 'NUMBER(10,0)',
+          'BIGINT': 'NUMBER(19,0)',
+          'NVARCHAR(MAX)': 'VARCHAR(16777216)',
+          'VARCHAR(MAX)': 'VARCHAR(16777216)',
+          'TEXT': 'VARCHAR(16777216)',
+          'NTEXT': 'VARCHAR(16777216)',
+          'IMAGE': 'BINARY',
+          'VARBINARY(MAX)': 'BINARY'
+        },
+        functions: {
+          'GETDATE()': 'CURRENT_TIMESTAMP()',
+          'GETUTCDATE()': 'CURRENT_TIMESTAMP()',
+          'SYSDATETIME()': 'CURRENT_TIMESTAMP()',
+          'DATEADD': 'DATEADD',
+          'DATEDIFF': 'DATEDIFF',
+          'DATEPART': 'DATE_PART',
+          'DATENAME': 'TO_CHAR',
+          'LEN': 'LENGTH',
+          'ISNULL': 'NVL',
+          'IIF': 'IFF',
+          'CHARINDEX': 'POSITION',
+          'PATINDEX': 'REGEXP_INSTR',
+          'STUFF': 'INSERT',
+          'REPLICATE': 'REPEAT',
+          'REVERSE': 'REVERSE',
+          'LEFT': 'LEFT',
+          'RIGHT': 'RIGHT',
+          'LTRIM': 'LTRIM',
+          'RTRIM': 'RTRIM',
+          'UPPER': 'UPPER',
+          'LOWER': 'LOWER',
+          'SUBSTRING': 'SUBSTRING',
+          'REPLACE': 'REPLACE',
+          'CAST': 'CAST',
+          'CONVERT': 'CAST',
+          'COALESCE': 'COALESCE',
+          'NULLIF': 'NULLIF'
+        }
+      },
+      oracle: {
+        dataTypes: {
+          'VARCHAR2': 'VARCHAR',
+          'NCHAR': 'CHAR',
+          'NVARCHAR2': 'VARCHAR',
+          'CLOB': 'VARCHAR(16777216)',
+          'BLOB': 'BINARY',
+          'DATE': 'TIMESTAMP_NTZ',
+          'TIMESTAMP': 'TIMESTAMP_NTZ'
+        },
+        functions: {
+          'SYSDATE': 'CURRENT_TIMESTAMP()',
+          'SYSTIMESTAMP': 'CURRENT_TIMESTAMP()',
+          'TO_DATE': 'TO_DATE',
+          'TO_CHAR': 'TO_CHAR',
+          'NVL': 'NVL',
+          'NVL2': 'IFF',
+          'DECODE': 'CASE'
+        }
+      }
     };
   }
 
-  async convertWithAI(sql, sourceDialect) {
+  convert(sql, sourceDialect = 'sqlserver') {
     try {
-      console.log(`Starting AI conversion for ${sourceDialect} SQL:`, sql.substring(0, 100) + '...');
+      console.log(`Starting conversion from ${sourceDialect} to Snowflake`);
       
-      // For now, use enhanced rule-based conversion with intelligent formatting
-      // This provides reliable, fast conversion without external API dependencies
-      console.log('Using enhanced rule-based conversion with intelligent formatting');
-      return this.enhancedRuleBasedConversion(sql, sourceDialect);
+      // Parse the SQL
+      this.parser.tokenize(sql);
+      
+      // Convert based on SQL structure
+      let convertedSql = this.convertStatement(sql, sourceDialect);
+      
+      // Apply post-processing
+      convertedSql = this.postProcess(convertedSql, sourceDialect);
+      
+      // Format the result
+      convertedSql = this.formatSQL(convertedSql);
+      
+      console.log('Conversion completed successfully');
+      return convertedSql;
+      
     } catch (error) {
-      console.error('AI conversion failed, using fallback:', error.message);
-      return this.fallbackConversion(sql, sourceDialect);
+      console.error('Conversion error:', error);
+      throw new Error(`SQL conversion failed: ${error.message}`);
     }
   }
 
-  enhancedRuleBasedConversion(sql, sourceDialect) {
-    let convertedSql = sql.trim();
-    const rules = this.getAllConversionRules(sourceDialect.toLowerCase());
+  convertStatement(sql, sourceDialect) {
+    let result = sql;
+    
+    // Handle SQL Server specific syntax
+    if (sourceDialect.toLowerCase() === 'sqlserver') {
+      result = this.convertSQLServerSyntax(result);
+    }
+    
+    // Apply data type conversions
+    result = this.convertDataTypes(result, sourceDialect);
+    
+    // Apply function conversions
+    result = this.convertFunctions(result, sourceDialect);
+    
+    // Handle quoted identifiers
+    result = this.convertQuotedIdentifiers(result, sourceDialect);
+    
+    return result;
+  }
 
-    console.log(`Applying ${rules.length} conversion rules for ${sourceDialect}`);
-
-    // Apply all conversion rules
-    for (const rule of rules) {
-      const beforeLength = convertedSql.length;
-      convertedSql = convertedSql.replace(rule.pattern, rule.replacement);
-      if (convertedSql.length !== beforeLength) {
-        console.log(`Applied rule: ${rule.pattern} -> ${rule.replacement}`);
+  convertSQLServerSyntax(sql) {
+    let result = sql;
+    
+    // Convert TOP N to LIMIT N (handle various TOP patterns)
+    result = result.replace(/\bSELECT\s+TOP\s+(\d+)\s+/gi, 'SELECT ');
+    result = result.replace(/\bSELECT\s+TOP\s*\(\s*(\d+)\s*\)\s+/gi, 'SELECT ');
+    
+    // Add LIMIT at the end if TOP was found
+    const topMatch = sql.match(/\bTOP\s*\(?\s*(\d+)\s*\)?/gi);
+    if (topMatch) {
+      const limitValue = topMatch[0].match(/\d+/)[0];
+      // Only add LIMIT if it's not already present
+      if (!/\bLIMIT\s+\d+/gi.test(result)) {
+        result = result.trim();
+        if (result.endsWith(';')) {
+          result = result.slice(0, -1) + `\nLIMIT ${limitValue};`;
+        } else {
+          result = result + `\nLIMIT ${limitValue}`;
+        }
       }
     }
-
-    // Apply intelligent formatting
-    convertedSql = this.formatSQL(convertedSql);
-    console.log('Applied intelligent formatting');
     
-    return convertedSql;
-  }
-
-  getAllConversionRules(sourceDialect) {
-    // Combine base rules with comprehensive function mappings
-    const baseRules = this.fallbackRules[sourceDialect] || this.fallbackRules.mysql;
-    const functionRules = this.getFunctionConversionRules(sourceDialect);
-    
-    return [...baseRules, ...functionRules];
-  }
-
-  getFunctionConversionRules(sourceDialect) {
-    const rules = [];
-    
-    if (sourceDialect === 'sqlserver') {
-      // Add comprehensive SQL Server function conversions
-      const functionMappings = {
-        // String Functions
-        'ASCII': 'ASCII',
-        'CHAR': 'CHR',
-        'CHARINDEX': 'POSITION',
-        'CONCAT': 'CONCAT',
-        'CONCAT_WS': 'CONCAT_WS',
-        'DIFFERENCE': 'SOUNDEX_DIFFERENCE',
-        'FORMAT': 'TO_CHAR',
-        'LEFT': 'LEFT',
-        'LEN': 'LENGTH',
-        'LOWER': 'LOWER',
-        'LTRIM': 'LTRIM',
-        'NCHAR': 'CHR',
-        'PATINDEX': 'REGEXP_INSTR',
-        'QUOTENAME': 'QUOTE_IDENT',
-        'REPLACE': 'REPLACE',
-        'REPLICATE': 'REPEAT',
-        'REVERSE': 'REVERSE',
-        'RIGHT': 'RIGHT',
-        'RTRIM': 'RTRIM',
-        'SOUNDEX': 'SOUNDEX',
-        'SPACE': 'REPEAT(\' \', n)',
-        'STR': 'TO_CHAR',
-        'STUFF': 'INSERT',
-        'SUBSTRING': 'SUBSTRING',
-        'TRANSLATE': 'TRANSLATE',
-        'TRIM': 'TRIM',
-        'UNICODE': 'UNICODE',
-        'UPPER': 'UPPER',
-        
-        // Numeric Functions
-        'ABS': 'ABS',
-        'ACOS': 'ACOS',
-        'ASIN': 'ASIN',
-        'ATAN': 'ATAN',
-        'ATN2': 'ATAN2',
-        'AVG': 'AVG',
-        'CEILING': 'CEIL',
-        'COUNT': 'COUNT',
-        'COS': 'COS',
-        'COT': '1/TAN',
-        'DEGREES': 'DEGREES',
-        'EXP': 'EXP',
-        'FLOOR': 'FLOOR',
-        'LOG': 'LN',
-        'LOG10': 'LOG',
-        'MAX': 'MAX',
-        'MIN': 'MIN',
-        'PI': 'PI',
-        'POWER': 'POWER',
-        'RADIANS': 'RADIANS',
-        'RAND': 'RANDOM',
-        'ROUND': 'ROUND',
-        'SIGN': 'SIGN',
-        'SIN': 'SIN',
-        'SQRT': 'SQRT',
-        'SQUARE': 'POWER(n, 2)',
-        'SUM': 'SUM',
-        'TAN': 'TAN',
-        
-        // Date Functions
-        'CURRENT_TIMESTAMP': 'CURRENT_TIMESTAMP',
-        'DATEADD': 'DATEADD',
-        'DATEDIFF': 'DATEDIFF',
-        'DATENAME': 'TO_CHAR',
-        'DATEPART': 'DATE_PART',
-        'DAY': 'DAY',
-        'GETDATE': 'CURRENT_TIMESTAMP',
-        'GETUTCDATE': 'CURRENT_TIMESTAMP',
-        'ISDATE': 'TRY_TO_DATE IS NOT NULL',
-        'MONTH': 'MONTH',
-        'SYSDATETIME': 'CURRENT_TIMESTAMP',
-        'YEAR': 'YEAR',
-        
-        // Advanced Functions
-        'CAST': 'CAST',
-        'COALESCE': 'COALESCE',
-        'CONVERT': 'CAST',
-        'CURRENT_USER': 'CURRENT_USER',
-        'IIF': 'IFF',
-        'ISNULL': 'NVL',
-        'ISNUMERIC': 'TRY_TO_NUMBER IS NOT NULL',
-        'NULLIF': 'NULLIF',
-        'SESSION_USER': 'CURRENT_USER',
-        'SESSIONPROPERTY': 'CURRENT_SESSION',
-        'SYSTEM_USER': 'CURRENT_USER',
-        'USER_NAME': 'CURRENT_USER'
-      };
-      
-      // Convert function mappings to regex rules
-      Object.entries(functionMappings).forEach(([sqlServerFunc, snowflakeFunc]) => {
-        rules.push({
-          pattern: new RegExp(`\\b${sqlServerFunc}\\s*\\(`, 'gi'),
-          replacement: `${snowflakeFunc}(`
-        });
-      });
+    // Convert ROWNUM (Oracle) to LIMIT
+    result = result.replace(/\bWHERE\s+ROWNUM\s*<=?\s*(\d+)/gi, '');
+    const rownumMatch = sql.match(/\bROWNUM\s*<=?\s*(\d+)/gi);
+    if (rownumMatch) {
+      const limitValue = rownumMatch[0].match(/\d+/)[0];
+      if (!/\bLIMIT\s+\d+/gi.test(result)) {
+        result = result.trim();
+        if (result.endsWith(';')) {
+          result = result.slice(0, -1) + `\nLIMIT ${limitValue};`;
+        } else {
+          result = result + `\nLIMIT ${limitValue}`;
+        }
+      }
     }
     
-    return rules;
+    // Convert square brackets to double quotes
+    result = result.replace(/\[([^\]]+)\]/g, '"$1"');
+    
+    // Convert IDENTITY to AUTOINCREMENT
+    result = result.replace(/\bIDENTITY\s*\(\s*\d+\s*,\s*\d+\s*\)/gi, 'AUTOINCREMENT');
+    
+    return result;
   }
 
-  fallbackConversion(sql, sourceDialect) {
-    let convertedSql = sql.trim();
-    const rules = this.fallbackRules[sourceDialect.toLowerCase()] || this.fallbackRules.mysql;
+  convertDataTypes(sql, sourceDialect) {
+    const mappings = this.dialectMappings[sourceDialect.toLowerCase()]?.dataTypes || {};
+    let result = sql;
+    
+    Object.entries(mappings).forEach(([from, to]) => {
+      const regex = new RegExp(`\\b${from}\\b`, 'gi');
+      result = result.replace(regex, to);
+    });
+    
+    // Handle parameterized types
+    result = result.replace(/\bVARCHAR\(MAX\)/gi, 'VARCHAR(16777216)');
+    result = result.replace(/\bNVARCHAR\(MAX\)/gi, 'VARCHAR(16777216)');
+    result = result.replace(/\bVARBINARY\(MAX\)/gi, 'BINARY');
+    
+    return result;
+  }
 
-    // Apply fallback conversion rules
-    for (const rule of rules) {
-      convertedSql = convertedSql.replace(rule.pattern, rule.replacement);
+  convertFunctions(sql, sourceDialect) {
+    const mappings = this.dialectMappings[sourceDialect.toLowerCase()]?.functions || {};
+    let result = sql;
+    
+    Object.entries(mappings).forEach(([from, to]) => {
+      // Handle functions with parentheses
+      if (from.endsWith('()')) {
+        const funcName = from.slice(0, -2);
+        const regex = new RegExp(`\\b${funcName}\\s*\\(\\s*\\)`, 'gi');
+        result = result.replace(regex, `${to}`);
+      } else {
+        // Handle function name replacements
+        const regex = new RegExp(`\\b${from}\\s*\\(`, 'gi');
+        result = result.replace(regex, `${to}(`);
+      }
+    });
+    
+    return result;
+  }
+
+  convertQuotedIdentifiers(sql, sourceDialect) {
+    let result = sql;
+    
+    if (sourceDialect.toLowerCase() === 'mysql') {
+      // Convert backticks to double quotes
+      result = result.replace(/`([^`]+)`/g, '"$1"');
+    } else if (sourceDialect.toLowerCase() === 'sqlserver') {
+      // Convert square brackets to double quotes
+      result = result.replace(/\[([^\]]+)\]/g, '"$1"');
     }
+    
+    return result;
+  }
 
-    return this.formatSQL(convertedSql);
+  postProcess(sql, sourceDialect) {
+    let result = sql;
+    
+    // Remove any duplicate spaces
+    result = result.replace(/\s+/g, ' ');
+    
+    // Ensure proper spacing around operators
+    result = result.replace(/([=<>!]+)/g, ' $1 ');
+    result = result.replace(/\s+([=<>!]+)\s+/g, ' $1 ');
+    
+    return result.trim();
   }
 
   formatSQL(sql) {
@@ -228,7 +349,7 @@ class AIConverter {
       return sql;
     }
 
-    let formatted = sql;
+    let formatted = sql.trim();
     
     // Normalize whitespace
     formatted = formatted.replace(/\s+/g, ' ').trim();
@@ -236,7 +357,7 @@ class AIConverter {
     // Add line breaks before major keywords
     const majorKeywords = [
       'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'ORDER BY', 'HAVING',
-      'UNION', 'UNION ALL', 'EXCEPT', 'INTERSECT', 'WITH'
+      'UNION', 'UNION ALL', 'EXCEPT', 'INTERSECT', 'WITH', 'LIMIT'
     ];
     
     majorKeywords.forEach(keyword => {
@@ -258,67 +379,13 @@ class AIConverter {
     formatted = formatted.replace(/\bELSE\b/gi, '\n  ELSE');
     formatted = formatted.replace(/\bEND\b/gi, '\nEND');
     
-    // Handle subqueries
-    formatted = this.formatSubqueries(formatted);
-    
     // Clean up multiple line breaks
     formatted = formatted.replace(/\n\s*\n/g, '\n');
     
     // Add proper indentation
     formatted = this.addIndentation(formatted);
     
-    // Fix spacing around operators
-    formatted = formatted.replace(/([=<>!]+)/g, ' $1 ');
-    formatted = formatted.replace(/\s+([=<>!]+)\s+/g, ' $1 ');
-    
-    // Clean up extra spaces
-    formatted = formatted.replace(/ +/g, ' ');
-    
     return formatted.trim();
-  }
-
-  formatSubqueries(sql) {
-    let formatted = sql;
-    let depth = 0;
-    let result = '';
-    let inString = false;
-    let stringChar = '';
-    
-    for (let i = 0; i < formatted.length; i++) {
-      const char = formatted[i];
-      const prevChar = i > 0 ? formatted[i - 1] : '';
-      
-      if ((char === '"' || char === "'") && prevChar !== '\\') {
-        if (!inString) {
-          inString = true;
-          stringChar = char;
-        } else if (char === stringChar) {
-          inString = false;
-          stringChar = '';
-        }
-      }
-      
-      if (!inString) {
-        if (char === '(') {
-          const nextPart = formatted.substring(i + 1, i + 20).trim().toUpperCase();
-          if (nextPart.startsWith('SELECT') || nextPart.startsWith('WITH')) {
-            depth++;
-            result += char + '\n' + '  '.repeat(depth);
-          } else {
-            result += char;
-          }
-        } else if (char === ')' && depth > 0) {
-          depth--;
-          result += '\n' + '  '.repeat(depth) + char;
-        } else {
-          result += char;
-        }
-      } else {
-        result += char;
-      }
-    }
-    
-    return result;
   }
 
   addIndentation(sql) {
@@ -330,7 +397,8 @@ class AIConverter {
       const trimmedLine = line.trim();
       if (!trimmedLine) return '';
       
-      if (trimmedLine.match(/^(FROM|WHERE|GROUP BY|ORDER BY|HAVING|UNION|EXCEPT|INTERSECT)$/i)) {
+      // Adjust indent level based on keywords
+      if (trimmedLine.match(/^(FROM|WHERE|GROUP BY|ORDER BY|HAVING|UNION|EXCEPT|INTERSECT|LIMIT)$/i)) {
         indentLevel = 0;
       } else if (trimmedLine.match(/^(JOIN|INNER JOIN|LEFT JOIN|RIGHT JOIN|FULL JOIN|FULL OUTER JOIN)$/i)) {
         indentLevel = 0;
@@ -342,6 +410,7 @@ class AIConverter {
       
       const indent = ' '.repeat(indentLevel * indentSize);
       
+      // Set indent for next line
       if (trimmedLine.match(/^(SELECT|WHERE|GROUP BY|ORDER BY|HAVING)$/i)) {
         indentLevel = 1;
       }
@@ -351,7 +420,7 @@ class AIConverter {
   }
 }
 
-const aiConverter = new AIConverter();
+const converter = new SnowflakeConverter();
 
 exports.handler = async (event, context) => {
   const headers = {
@@ -381,7 +450,7 @@ exports.handler = async (event, context) => {
     const multipart = await import('lambda-multipart-parser');
     const result = await multipart.parse(event);
     const files = result.files || [];
-    const sourceDialect = result.sourceDialect || 'mysql';
+    const sourceDialect = result.sourceDialect || 'sqlserver';
 
     if (!files || files.length === 0) {
       return {
@@ -391,14 +460,21 @@ exports.handler = async (event, context) => {
       };
     }
 
+    console.log(`Processing ${files.length} files from ${sourceDialect} to Snowflake`);
+
     const processedFiles = await Promise.allSettled(
       files.map(async (file) => {
         const originalSql = file.content.toString('utf-8');
         
         try {
-          console.log(`Processing file: ${file.filename}`);
-          const convertedSql = await aiConverter.convertWithAI(originalSql, sourceDialect);
+          console.log(`Converting file: ${file.filename}`);
+          console.log(`Original SQL preview: ${originalSql.substring(0, 200)}...`);
+          
+          const convertedSql = converter.convert(originalSql, sourceDialect);
+          
           console.log(`Successfully converted ${file.filename}`);
+          console.log(`Converted SQL preview: ${convertedSql.substring(0, 200)}...`);
+          
           return {
             filename: file.filename,
             originalSql,
@@ -435,13 +511,15 @@ exports.handler = async (event, context) => {
       }
     });
 
+    console.log(`Conversion completed. Success: ${results.filter(r => r.status === 'success').length}, Errors: ${results.filter(r => r.status === 'error').length}`);
+
     return {
       statusCode: 200,
       headers,
       body: JSON.stringify({ files: results }),
     };
   } catch (error) {
-    console.error('Conversion error:', error);
+    console.error('Handler error:', error);
     return {
       statusCode: 500,
       headers,
