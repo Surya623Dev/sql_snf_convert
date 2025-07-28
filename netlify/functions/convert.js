@@ -180,6 +180,7 @@ class SnowflakeConverter {
         functions: {
           'SYSDATE': 'CURRENT_TIMESTAMP()',
           'SYSTIMESTAMP': 'CURRENT_TIMESTAMP()',
+          'SYSDATETIMEOFFSET()': 'CURRENT_TIMESTAMP()::TIMESTAMP_TZ',
           'TO_DATE': 'TO_DATE',
           'TO_CHAR': 'TO_CHAR',
           'NVL': 'NVL',
