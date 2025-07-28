@@ -85,6 +85,7 @@ class SQLParser {
 class SnowflakeConverter {
   constructor() {
     this.parser = new SQLParser();
+    this.complexFunctionPatterns = this.initializeComplexPatterns();
     this.dialectMappings = {
       mysql: {
         dataTypes: {
@@ -189,6 +190,168 @@ class SnowflakeConverter {
     };
   }
 
+  initializeComplexPatterns() {
+    return {
+      sqlserver: [
+        // ISDATE function patterns
+        {
+          pattern: /ISDATE\s*\(\s*CONVERT\s*\(\s*varchar\s*,\s*([^,]+)\s*,\s*23\s*\)\s*\)/gi,
+          replacement: (match, dateField) => {
+            return `CASE 
+  WHEN TRY_TO_DATE(TO_CHAR(${dateField.trim()}, 'YYYY-MM-DD')) IS NOT NULL THEN TRUE
+  ELSE FALSE
+END`;
+          }
+        },
+        {
+          pattern: /ISDATE\s*\(\s*([^)]+)\s*\)/gi,
+          replacement: (match, dateField) => {
+            return `CASE 
+  WHEN TRY_TO_DATE(${dateField.trim()}) IS NOT NULL THEN TRUE
+  ELSE FALSE
+END`;
+          }
+        },
+        // CONVERT function patterns
+        {
+          pattern: /CONVERT\s*\(\s*varchar\s*\(\s*(\d+)\s*\)\s*,\s*([^,]+)\s*,\s*23\s*\)/gi,
+          replacement: (match, length, field) => {
+            return `TO_CHAR(${field.trim()}, 'YYYY-MM-DD')`;
+          }
+        },
+        {
+          pattern: /CONVERT\s*\(\s*varchar\s*,\s*([^,]+)\s*,\s*23\s*\)/gi,
+          replacement: (match, field) => {
+            return `TO_CHAR(${field.trim()}, 'YYYY-MM-DD')`;
+          }
+        },
+        {
+          pattern: /CONVERT\s*\(\s*varchar\s*\(\s*(\d+)\s*\)\s*,\s*([^,]+)\s*,\s*120\s*\)/gi,
+          replacement: (match, length, field) => {
+            return `TO_CHAR(${field.trim()}, 'YYYY-MM-DD HH24:MI:SS')`;
+          }
+        },
+        {
+          pattern: /CONVERT\s*\(\s*varchar\s*,\s*([^,]+)\s*,\s*120\s*\)/gi,
+          replacement: (match, field) => {
+            return `TO_CHAR(${field.trim()}, 'YYYY-MM-DD HH24:MI:SS')`;
+          }
+        },
+        {
+          pattern: /CONVERT\s*\(\s*datetime\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, field) => {
+            return `TO_TIMESTAMP(${field.trim()})`;
+          }
+        },
+        {
+          pattern: /CONVERT\s*\(\s*date\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, field) => {
+            return `TO_DATE(${field.trim()})`;
+          }
+        },
+        // DATEADD patterns
+        {
+          pattern: /DATEADD\s*\(\s*year\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, interval, date) => {
+            return `DATEADD(YEAR, ${interval.trim()}, ${date.trim()})`;
+          }
+        },
+        {
+          pattern: /DATEADD\s*\(\s*month\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, interval, date) => {
+            return `DATEADD(MONTH, ${interval.trim()}, ${date.trim()})`;
+          }
+        },
+        {
+          pattern: /DATEADD\s*\(\s*day\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, interval, date) => {
+            return `DATEADD(DAY, ${interval.trim()}, ${date.trim()})`;
+          }
+        },
+        // DATEDIFF patterns
+        {
+          pattern: /DATEDIFF\s*\(\s*year\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, date1, date2) => {
+            return `DATEDIFF(YEAR, ${date1.trim()}, ${date2.trim()})`;
+          }
+        },
+        {
+          pattern: /DATEDIFF\s*\(\s*month\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, date1, date2) => {
+            return `DATEDIFF(MONTH, ${date1.trim()}, ${date2.trim()})`;
+          }
+        },
+        {
+          pattern: /DATEDIFF\s*\(\s*day\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, date1, date2) => {
+            return `DATEDIFF(DAY, ${date1.trim()}, ${date2.trim()})`;
+          }
+        },
+        // DATEPART patterns
+        {
+          pattern: /DATEPART\s*\(\s*year\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, date) => {
+            return `DATE_PART(YEAR, ${date.trim()})`;
+          }
+        },
+        {
+          pattern: /DATEPART\s*\(\s*month\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, date) => {
+            return `DATE_PART(MONTH, ${date.trim()})`;
+          }
+        },
+        {
+          pattern: /DATEPART\s*\(\s*day\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, date) => {
+            return `DATE_PART(DAY, ${date.trim()})`;
+          }
+        },
+        // IIF patterns
+        {
+          pattern: /IIF\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, condition, trueValue, falseValue) => {
+            return `IFF(${condition.trim()}, ${trueValue.trim()}, ${falseValue.trim()})`;
+          }
+        },
+        // CHARINDEX patterns
+        {
+          pattern: /CHARINDEX\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, substring, string) => {
+            return `POSITION(${substring.trim()} IN ${string.trim()})`;
+          }
+        },
+        // STUFF patterns
+        {
+          pattern: /STUFF\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, string, start, length, replacement) => {
+            return `INSERT(${string.trim()}, ${start.trim()}, ${length.trim()}, ${replacement.trim()})`;
+          }
+        }
+      ],
+      mysql: [
+        // MySQL specific patterns can be added here
+        {
+          pattern: /IFNULL\s*\(\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, expr, replacement) => {
+            return `NVL(${expr.trim()}, ${replacement.trim()})`;
+          }
+        }
+      ],
+      postgresql: [
+        // PostgreSQL specific patterns can be added here
+      ],
+      oracle: [
+        // Oracle specific patterns can be added here
+        {
+          pattern: /NVL2\s*\(\s*([^,]+)\s*,\s*([^,]+)\s*,\s*([^)]+)\s*\)/gi,
+          replacement: (match, expr, notNull, isNull) => {
+            return `IFF(${expr.trim()} IS NOT NULL, ${notNull.trim()}, ${isNull.trim()})`;
+          }
+        }
+      ]
+    };
+  }
+
   convert(sql, sourceDialect = 'sqlserver') {
     try {
       console.log(`Starting conversion from ${sourceDialect} to Snowflake`);
@@ -224,6 +387,9 @@ class SnowflakeConverter {
     
     // Apply data type conversions
     result = this.convertDataTypes(result, sourceDialect);
+    
+    // Apply complex function pattern conversions BEFORE simple function conversions
+    result = this.convertComplexFunctions(result, sourceDialect);
     
     // Apply function conversions
     result = this.convertFunctions(result, sourceDialect);
@@ -276,6 +442,29 @@ class SnowflakeConverter {
     
     // Convert IDENTITY to AUTOINCREMENT
     result = result.replace(/\bIDENTITY\s*\(\s*\d+\s*,\s*\d+\s*\)/gi, 'AUTOINCREMENT');
+    
+    return result;
+  }
+
+  convertComplexFunctions(sql, sourceDialect) {
+    let result = sql;
+    const patterns = this.complexFunctionPatterns[sourceDialect.toLowerCase()] || [];
+    
+    console.log(`Applying ${patterns.length} complex function patterns for ${sourceDialect}`);
+    
+    patterns.forEach((patternObj, index) => {
+      const beforeConversion = result;
+      
+      if (typeof patternObj.replacement === 'function') {
+        result = result.replace(patternObj.pattern, patternObj.replacement);
+      } else {
+        result = result.replace(patternObj.pattern, patternObj.replacement);
+      }
+      
+      if (beforeConversion !== result) {
+        console.log(`Applied complex pattern ${index + 1}: Function conversion successful`);
+      }
+    });
     
     return result;
   }
